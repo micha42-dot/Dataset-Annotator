@@ -19,7 +19,10 @@ import {
   X,
   Terminal,
   Cpu,
-  Archive
+  Archive,
+  LayoutGrid,
+  Maximize2,
+  Maximize
 } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import JSZip from 'jszip';
@@ -57,7 +60,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   geminiKey: '',
 };
 
-function Thumbnail({ item, onClick }: { item: DatasetItem, onClick: () => void }) {
+function Thumbnail({ item, onClick, onEdit, onFullView }: { 
+  item: DatasetItem, 
+  onClick: () => void, 
+  onEdit: () => void,
+  onFullView: () => void 
+}) {
   const [url, setUrl] = useState<string | null>(item.imageUrl || null);
   
   useEffect(() => {
@@ -95,11 +103,30 @@ function Thumbnail({ item, onClick }: { item: DatasetItem, onClick: () => void }
           <ImageIcon className="w-8 h-8 animate-pulse" />
         </div>
       )}
-      <div className="absolute bottom-0 left-0 right-0 bg-paper/90 backdrop-blur-md p-3 text-[10px] tracking-wider truncate text-ink/70 border-t border-ink/5 font-bold uppercase">
+      
+      {/* Hover Actions */}
+      <div className="absolute inset-0 bg-ink/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3 rounded-2xl z-20">
+        <button 
+          onClick={(e) => { e.stopPropagation(); onFullView(); }}
+          className="w-28 bg-white/20 hover:bg-white/40 backdrop-blur-md text-white py-2 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all border border-white/20 flex items-center justify-center gap-2"
+        >
+          <Maximize className="w-3 h-3" />
+          Full View
+        </button>
+        <button 
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          className="w-28 bg-brand hover:bg-brand/90 text-white py-2 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all shadow-lg shadow-brand/20 flex items-center justify-center gap-2"
+        >
+          <Edit3 className="w-3 h-3" />
+          Edit Mode
+        </button>
+      </div>
+
+      <div className="absolute bottom-0 left-0 right-0 bg-paper/90 backdrop-blur-md p-3 text-[10px] tracking-wider truncate text-ink/70 border-t border-ink/5 font-bold uppercase z-10">
         {item.baseName}
       </div>
       {(item.textHandle || item.textFile) && (
-        <div className="absolute top-0 right-0 bg-brand text-white p-2 shadow-lg rounded-bl-2xl">
+        <div className="absolute top-0 right-0 bg-brand text-white p-2 shadow-lg rounded-bl-2xl z-10">
           <FileText className="w-3.5 h-3.5" />
         </div>
       )}
@@ -892,9 +919,27 @@ export default function DatasetAnnotator() {
     return (
       <div className="flex-1 flex flex-col min-h-0 bg-paper/50">
         <div className="h-14 border-b border-ink/10 flex items-center justify-between px-6 bg-paper/80 backdrop-blur-md">
-          <h2 className="text-[11px] uppercase tracking-wider text-ink/60 font-serif italic">
-            Dataset Overview <span className="text-brand ml-2 font-sans not-italic font-bold">[{items.length} ITEMS]</span>
-          </h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-[11px] uppercase tracking-wider text-ink/60 font-serif italic">
+              Dataset Overview <span className="text-brand ml-2 font-sans not-italic font-bold">[{items.length} ITEMS]</span>
+            </h2>
+            <div className="flex items-center gap-1 bg-ink/5 p-1 rounded-full border border-ink/10 ml-2">
+              <button 
+                onClick={() => setViewMode('grid')}
+                className={`p-1.5 rounded-full transition-all ${viewMode === 'grid' ? 'bg-white text-brand shadow-sm' : 'text-ink/30 hover:text-ink'}`}
+                title="Grid View"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+              </button>
+              <button 
+                onClick={() => setViewMode('editor')}
+                className={`p-1.5 rounded-full transition-all ${viewMode === 'editor' ? 'bg-white text-brand shadow-sm' : 'text-ink/30 hover:text-ink'}`}
+                title="Editor View"
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
           <div className="flex items-center gap-4">
             <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
@@ -932,6 +977,14 @@ export default function DatasetAnnotator() {
                 onClick={() => {
                   selectItem(startIndex + idx);
                 }} 
+                onEdit={() => {
+                  selectItem(startIndex + idx);
+                  setViewMode('editor');
+                }}
+                onFullView={() => {
+                  selectItem(startIndex + idx);
+                  setShowLightbox(true);
+                }}
               />
             ))}
           </div>
@@ -1174,9 +1227,27 @@ export default function DatasetAnnotator() {
               
               {/* CENTER PANE: Image Viewer */}
               <div className="h-14 border-b border-ink/10 flex items-center justify-between px-6 bg-paper/80 backdrop-blur-md">
-                <span className="font-mono text-[11px] uppercase tracking-wider text-brand font-bold">
-                  {activeItem.baseName}
-                </span>
+                <div className="flex items-center gap-4">
+                  <span className="font-mono text-[11px] uppercase tracking-wider text-brand font-bold">
+                    {activeItem.baseName}
+                  </span>
+                  <div className="flex items-center gap-1 bg-ink/5 p-1 rounded-full border border-ink/10 ml-2">
+                    <button 
+                      onClick={() => setViewMode('grid')}
+                      className={`p-1.5 rounded-full transition-all ${viewMode === 'grid' ? 'bg-white text-brand shadow-sm' : 'text-ink/30 hover:text-ink'}`}
+                      title="Grid View"
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                    </button>
+                    <button 
+                      onClick={() => setViewMode('editor')}
+                      className={`p-1.5 rounded-full transition-all ${viewMode === 'editor' ? 'bg-white text-brand shadow-sm' : 'text-ink/30 hover:text-ink'}`}
+                      title="Editor View"
+                    >
+                      <Maximize2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
                 <div className="flex items-center gap-4">
                   <button onClick={() => selectItem(selectedIndex - 1)} disabled={selectedIndex === 0} className="text-ink/40 hover:text-brand disabled:opacity-30 p-1 rounded-md hover:bg-ink/5 transition-colors">
                     <ChevronLeft className="w-5 h-5" />
@@ -1191,12 +1262,21 @@ export default function DatasetAnnotator() {
               </div>
               <div className="flex-1 p-12 flex items-center justify-center relative overflow-hidden">
                 {activeItem.imageUrl ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img 
-                    src={activeItem.imageUrl} 
-                    alt={activeItem.baseName}
-                    className="max-w-full max-h-full object-contain shadow-2xl border border-ink/5 rounded-3xl z-10 bg-white p-4"
-                  />
+                  <div className="relative group">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img 
+                      src={activeItem.imageUrl} 
+                      alt={activeItem.baseName}
+                      className="max-w-full max-h-full object-contain shadow-2xl border border-ink/5 rounded-3xl z-10 bg-white p-4"
+                    />
+                    <button 
+                      onClick={() => setShowLightbox(true)}
+                      className="absolute top-8 right-8 bg-ink/80 hover:bg-brand backdrop-blur-md text-white p-3 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-2xl z-20 active:scale-90"
+                      title="Full View"
+                    >
+                      <Maximize className="w-5 h-5" />
+                    </button>
+                  </div>
                 ) : (
                   <div className="animate-pulse text-ink/20 font-serif italic text-sm uppercase tracking-wider">Loading asset...</div>
                 )}
@@ -1249,6 +1329,56 @@ export default function DatasetAnnotator() {
                         placeholder="AIzaSy..."
                         className="w-full bg-white border border-ink/10 text-ink text-xs p-2.5 rounded-xl focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-mono"
                       />
+                    </div>
+                  )}
+
+                  {settings.provider === 'openrouter' && (
+                    <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase tracking-widest text-ink/40 font-bold">API Key</label>
+                        <input 
+                          type="password"
+                          value={settings.openRouterKey}
+                          onChange={(e) => updateSettings({ openRouterKey: e.target.value })}
+                          placeholder="sk-or-..."
+                          className="w-full bg-white border border-ink/10 text-ink text-xs p-2.5 rounded-xl focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase tracking-widest text-ink/40 font-bold">Model</label>
+                        <input 
+                          type="text"
+                          value={settings.openRouterModel}
+                          onChange={(e) => updateSettings({ openRouterModel: e.target.value })}
+                          placeholder="google/gemini-2.0-flash-001"
+                          className="w-full bg-white border border-ink/10 text-ink text-xs p-2.5 rounded-xl focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-mono"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {settings.provider === 'ollama' && (
+                    <div className="space-y-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase tracking-widest text-ink/40 font-bold">Ollama URL</label>
+                        <input 
+                          type="text"
+                          value={settings.ollamaUrl}
+                          onChange={(e) => updateSettings({ ollamaUrl: e.target.value })}
+                          placeholder="http://localhost:11434"
+                          className="w-full bg-white border border-ink/10 text-ink text-xs p-2.5 rounded-xl focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] uppercase tracking-widest text-ink/40 font-bold">Model</label>
+                        <input 
+                          type="text"
+                          value={settings.ollamaModel}
+                          onChange={(e) => updateSettings({ ollamaModel: e.target.value })}
+                          placeholder="llama3"
+                          className="w-full bg-white border border-ink/10 text-ink text-xs p-2.5 rounded-xl focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/10 transition-all font-mono"
+                        />
+                      </div>
                     </div>
                   )}
 
