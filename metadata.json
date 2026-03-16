@@ -1,0 +1,5 @@
+{
+  "name": "Dataset Annotator",
+  "description": "View and edit local image datasets and their corresponding text files.",
+  "requestFramePermissions": []
+}
