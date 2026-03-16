@@ -21,6 +21,8 @@ const nextConfig: NextConfig = {
     ],
   },
   output: process.env.GITHUB_ACTIONS ? 'export' : 'standalone',
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',
+  assetPrefix: process.env.NEXT_PUBLIC_BASE_PATH || '',
   transpilePackages: ['motion'],
   webpack: (config, {dev}) => {
     // HMR is disabled in AI Studio via DISABLE_HMR env var.
