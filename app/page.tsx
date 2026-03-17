@@ -36,6 +36,7 @@ interface DatasetItem {
   textFile?: File;
   imageUrl?: string;
   textContent?: string;
+  dirHandle?: FileSystemDirectoryHandle;
 }
 
 interface AppSettings {
@@ -226,6 +227,9 @@ export default function DatasetAnnotator() {
     const newSettings = { ...settings, ...updates };
     setSettings(newSettings);
     localStorage.setItem('dataset_annotator_settings', JSON.stringify(newSettings));
+    if (dirHandle) {
+        saveProject(dirHandle, newSettings);
+    }
   };
 
 
@@ -298,8 +302,70 @@ export default function DatasetAnnotator() {
     }
   };
 
+  const loadDatasetFromFiles = async (files: File[]) => {
+      const fileMap = new Map<string, { image?: File, text?: File }>();
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const match = file.name.match(/^(.*)\.(png|jpg|jpeg|webp|txt)$/i);
+        if (match) {
+          const baseName = match[1];
+          const ext = match[2].toLowerCase();
+          
+          if (!fileMap.has(baseName)) fileMap.set(baseName, {});
+          const item = fileMap.get(baseName)!;
+          
+          if (ext === 'txt') {
+            item.text = file;
+          } else {
+            item.image = file;
+          }
+        }
+      }
+      
+      const newItems: DatasetItem[] = [];
+      for (const [baseName, handles] of fileMap.entries()) {
+        if (handles.image) {
+          newItems.push({
+            baseName,
+            imageFile: handles.image,
+            textFile: handles.text
+          });
+        }
+      }
+      
+      const sortedItems = newItems.sort((a, b) => a.baseName.localeCompare(b.baseName));
+      setItems(sortedItems);
+      
+      if (sortedItems.length > 0) {
+        setViewMode('grid');
+        setCurrentPage(1);
+        setSelectedIndex(-1);
+      }
+  };
+
   const handleOpenIndividualDataset = async () => {
     setError(null);
+    
+    if (!('showDirectoryPicker' in window)) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        // @ts-ignore
+        input.webkitdirectory = true;
+        // @ts-ignore
+        input.directory = true;
+        input.multiple = true;
+        
+        input.onchange = async (e) => {
+            const files = (e.target as HTMLInputElement).files;
+            if (!files) return;
+            setIsFallbackMode(true);
+            await loadDatasetFromFiles(Array.from(files));
+        };
+        input.click();
+        return;
+    }
+
     try {
         const handle = await getDirectoryHandle();
         if (!handle) {
@@ -344,13 +410,15 @@ export default function DatasetAnnotator() {
           newItems.push({
             baseName,
             imageHandle: handles.image,
-            textHandle: handles.text
+            textHandle: handles.text,
+            dirHandle: handle
           });
         }
       }
       
       const sortedItems = newItems.sort((a, b) => a.baseName.localeCompare(b.baseName));
       setItems(sortedItems);
+      setDirHandle(handle);
       
       if (sortedItems.length > 0) {
         setViewMode('grid');
@@ -447,11 +515,15 @@ export default function DatasetAnnotator() {
 
   const loadProject = async (handle: any) => {
     try {
+      console.log("Loading project from handle:", handle);
       const fileHandle = await handle.getFileHandle('.annotator-project.json');
+      console.log("Found file handle:", fileHandle);
       const file = await fileHandle.getFile();
       const content = await file.text();
+      console.log("File content:", content);
       return JSON.parse(content);
     } catch (err) {
+      console.log("Error loading project:", err);
       return null;
     }
   };
@@ -569,11 +641,12 @@ export default function DatasetAnnotator() {
           if (isFallbackMode) {
             const blob = new Blob([newText], { type: 'text/plain' });
             item.textFile = new File([blob], `${item.baseName}.txt`, { type: 'text/plain' });
-          } else if (dirHandle) {
+          } else if (item.dirHandle || dirHandle) {
+            const activeDirHandle = item.dirHandle || dirHandle;
             let textHandle = item.textHandle;
             if (!textHandle) {
               // @ts-ignore
-              textHandle = await dirHandle.getFileHandle(`${item.baseName}.txt`, { create: true });
+              textHandle = await activeDirHandle.getFileHandle(`${item.baseName}.txt`, { create: true });
               item.textHandle = textHandle;
             }
             // @ts-ignore
@@ -644,11 +717,12 @@ export default function DatasetAnnotator() {
           if (isFallbackMode) {
             const blob = new Blob([newText], { type: 'text/plain' });
             item.textFile = new File([blob], `${item.baseName}.txt`, { type: 'text/plain' });
-          } else if (dirHandle) {
+          } else if (item.dirHandle || dirHandle) {
+            const activeDirHandle = item.dirHandle || dirHandle;
             let textHandle = item.textHandle;
             if (!textHandle) {
               // @ts-ignore
-              textHandle = await dirHandle.getFileHandle(`${item.baseName}.txt`, { create: true });
+              textHandle = await activeDirHandle.getFileHandle(`${item.baseName}.txt`, { create: true });
               item.textHandle = textHandle;
             }
             // @ts-ignore
@@ -804,12 +878,13 @@ export default function DatasetAnnotator() {
         item.textContent = currentText;
         item.textFile = new File([blob], `${item.baseName}.txt`, { type: 'text/plain' });
       } else {
-        if (!dirHandle) throw new Error("Directory handle not found");
+        const activeDirHandle = item.dirHandle || dirHandle;
+        if (!activeDirHandle) throw new Error("Directory handle not found");
         let textHandle = item.textHandle;
         
         if (!textHandle) {
           // @ts-ignore
-          textHandle = await dirHandle.getFileHandle(`${item.baseName}.txt`, { create: true });
+          textHandle = await activeDirHandle.getFileHandle(`${item.baseName}.txt`, { create: true });
           item.textHandle = textHandle;
         }
         
@@ -1023,7 +1098,7 @@ export default function DatasetAnnotator() {
         <div className="p-6 border-b border-ink/10">
           <div className="flex items-center justify-between mb-6">
             <h1 
-              onClick={() => setViewMode('grid')}
+              onClick={() => datasets.length > 0 ? setViewMode('overview') : setViewMode('grid')}
               className="text-xl font-serif italic tracking-tight flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
             >
               <div className="w-8 h-8 rounded-full bg-brand flex items-center justify-center shadow-lg shadow-brand/20">
