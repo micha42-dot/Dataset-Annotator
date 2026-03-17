@@ -126,7 +126,7 @@ export default function DatasetAnnotator() {
   const [isFallbackMode, setIsFallbackMode] = useState(false);
   
   const [viewMode, setViewMode] = useState<'overview' | 'editor' | 'grid'>('overview');
-  const [datasets, setDatasets] = useState<{name: string, handle: FileSystemDirectoryHandle}[]>([]);
+  const [datasets, setDatasets] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 24;
 
@@ -146,6 +146,8 @@ export default function DatasetAnnotator() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'done'>('all');
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showSessionPrompt, setShowSessionPrompt] = useState(false);
+  const [pendingHandle, setPendingHandle] = useState<FileSystemDirectoryHandle | null>(null);
 
   // Derived items based on search and filter
   const filteredItems = items.filter(item => {
@@ -226,102 +228,90 @@ export default function DatasetAnnotator() {
     localStorage.setItem('dataset_annotator_settings', JSON.stringify(newSettings));
   };
 
-  const handleOpenDirectory = async () => {
-    setError(null);
-    
-    if (!('showDirectoryPicker' in window)) {
-      // ... (keep fallback) ...
-      const input = document.createElement('input');
-      input.type = 'file';
-      // @ts-ignore
-      input.webkitdirectory = true;
-      // @ts-ignore
-      input.directory = true;
-      input.multiple = true;
-      
-      input.onchange = async (e) => {
-        const files = (e.target as HTMLInputElement).files;
-        if (!files) return;
-        
-        setIsFallbackMode(true);
-        const fileMap = new Map<string, { image?: File, text?: File }>();
-        
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const match = file.name.match(/^(.*)\.(png|jpg|jpeg|webp|txt)$/i);
-          if (match) {
-            const baseName = match[1];
-            const ext = match[2].toLowerCase();
-            
-            if (!fileMap.has(baseName)) fileMap.set(baseName, {});
-            const item = fileMap.get(baseName)!;
-            
-            if (ext === 'txt') {
-              item.text = file;
-            } else {
-              item.image = file;
-            }
-          }
-        }
-        
-        const newItems: DatasetItem[] = [];
-        for (const [baseName, handles] of fileMap.entries()) {
-          if (handles.image) {
-            newItems.push({
-              baseName,
-              imageFile: handles.image,
-              textFile: handles.text
-            });
-          }
-        }
-        
-        const sortedItems = newItems.sort((a, b) => a.baseName.localeCompare(b.baseName));
-        setItems(sortedItems);
-        
-        if (sortedItems.length > 0) {
-          setViewMode('grid');
-          setCurrentPage(1);
-          setSelectedIndex(-1);
-        }
-      };
-      
-      input.click();
-      return;
-    }
 
-    try {
-      // @ts-ignore
-      const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-      setDirHandle(handle);
-      setIsFallbackMode(false);
-      
-      const subDirs: {name: string, handle: FileSystemDirectoryHandle}[] = [];
-      
-      // @ts-ignore
-      for await (const entry of handle.values()) {
-        if (entry.kind === 'directory') {
-          subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle});
-        }
-      }
-      
-      if (subDirs.length > 0) {
-        setDatasets(subDirs);
-        setViewMode('overview');
-        // Load project settings if they exist
+
+  const getDirectoryHandle = async (): Promise<FileSystemDirectoryHandle | null> => {
+    if (!('showDirectoryPicker' in window)) {
+      // Fallback for browsers without showDirectoryPicker
+      // Note: This is a simplified fallback, it might not work as expected for all cases.
+      // The user will have to select files manually.
+      return null;
+    }
+    // @ts-ignore
+    return await window.showDirectoryPicker({ mode: 'readwrite' });
+  };
+
+  const processDirectory = async (handle: FileSystemDirectoryHandle, loadSession: boolean) => {
+    setDirHandle(handle);
+    setIsFallbackMode(false);
+    
+    if (loadSession) {
         const projectSettings = await loadProject(handle);
         if (projectSettings) {
             setSettings(prev => ({...prev, ...projectSettings}));
         }
-      } else {
-        // No subdirectories, scan for images directly
-        await handleLoadDataset(handle);
+    }
+
+    const subDirs: {name: string, handle: FileSystemDirectoryHandle}[] = [];
+    
+    // @ts-ignore
+    for await (const entry of handle.values()) {
+      if (entry.kind === 'directory') {
+        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle});
       }
+    }
+    
+    if (subDirs.length > 0) {
+      setDatasets(subDirs);
+      setViewMode('overview');
+    } else {
+      // No subdirectories, scan for images directly
+      await handleLoadDataset(handle);
+    }
+  };
+
+  const handleOpenMainDirectory = async () => {
+    setError(null);
+    
+    try {
+      const handle = await getDirectoryHandle();
+      if (!handle) {
+        setError("Directory picker not supported in this browser.");
+        return;
+      }
+      
+      // Check for session
+      const projectSettings = await loadProject(handle);
+      if (projectSettings) {
+          setPendingHandle(handle);
+          setShowSessionPrompt(true);
+          return;
+      }
+      
+      await processDirectory(handle, false);
       
     } catch (err: any) {
       console.error(err);
       if (err.name !== 'AbortError') {
         setError(err.message || 'Failed to open directory.');
       }
+    }
+  };
+
+  const handleOpenIndividualDataset = async () => {
+    setError(null);
+    try {
+        const handle = await getDirectoryHandle();
+        if (!handle) {
+            setError("Directory picker not supported in this browser.");
+            return;
+        }
+        await handleLoadDataset(handle);
+    } catch (err: any) {
+        console.error(err);
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Failed to open directory.');
+        }
     }
   };
 
@@ -455,11 +445,7 @@ export default function DatasetAnnotator() {
     );
   };
 
-  const handleLoadDataset = async (handle: FileSystemDirectoryHandle) => {
-    // ... logic for loading images from a directory ...
-  };
-
-  const loadProject = async (handle: FileSystemDirectoryHandle) => {
+  const loadProject = async (handle: any) => {
     try {
       const fileHandle = await handle.getFileHandle('.annotator-project.json');
       const file = await fileHandle.getFile();
@@ -1054,13 +1040,22 @@ export default function DatasetAnnotator() {
             </button>
           </div>
 
-          <button
-            onClick={handleOpenDirectory}
-            className="w-full flex items-center justify-center gap-2 bg-brand hover:bg-brand/90 text-white py-2.5 px-4 font-bold text-xs rounded-full transition-all shadow-lg shadow-brand/20 active:scale-[0.98] uppercase tracking-widest"
-          >
-            <FolderOpen className="w-3.5 h-3.5" />
-            Mount Directory
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleOpenMainDirectory}
+              className="w-full flex items-center justify-center gap-2 bg-brand hover:bg-brand/90 text-white py-2.5 px-4 font-bold text-xs rounded-full transition-all shadow-lg shadow-brand/20 active:scale-[0.98] uppercase tracking-widest"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              Mount Main Directory
+            </button>
+            <button
+              onClick={handleOpenIndividualDataset}
+              className="w-full flex items-center justify-center gap-2 bg-ink/10 hover:bg-ink/20 text-ink py-2.5 px-4 font-bold text-xs rounded-full transition-all shadow-lg shadow-ink/5 active:scale-[0.98] uppercase tracking-widest"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              Mount Dataset
+            </button>
+          </div>
           
           {items.length > 0 && (
             <div className="mt-4 space-y-4">
@@ -1656,6 +1651,29 @@ export default function DatasetAnnotator() {
             
             <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-12 text-white/60 font-mono text-[10px] uppercase tracking-widest bg-white/5 px-6 py-2 rounded-full backdrop-blur-md border border-white/10">
               {activeItem.baseName}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSessionPrompt && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-ink/50 backdrop-blur-sm p-4">
+          <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full">
+            <h2 className="text-lg font-bold mb-2">Session Found</h2>
+            <p className="text-sm text-ink/60 mb-6">A previous session was found in this directory. Do you want to load it?</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => { setShowSessionPrompt(false); if (pendingHandle) processDirectory(pendingHandle, false); }}
+                className="flex-1 py-2 rounded-full bg-ink/10 text-ink font-bold text-xs uppercase tracking-widest hover:bg-ink/20"
+              >
+                No
+              </button>
+              <button 
+                onClick={() => { setShowSessionPrompt(false); if (pendingHandle) processDirectory(pendingHandle, true); }}
+                className="flex-1 py-2 rounded-full bg-brand text-white font-bold text-xs uppercase tracking-widest hover:bg-brand/90"
+              >
+                Yes
+              </button>
             </div>
           </div>
         </div>
