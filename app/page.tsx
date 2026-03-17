@@ -60,11 +60,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   geminiKey: '',
 };
 
-function Thumbnail({ item, onClick, onEdit, onFullView }: { 
+function Thumbnail({ item, onClick }: { 
   item: DatasetItem, 
-  onClick: () => void, 
-  onEdit: () => void,
-  onFullView: () => void 
+  onClick: () => void 
 }) {
   const [url, setUrl] = useState<string | null>(item.imageUrl || null);
   
@@ -103,25 +101,6 @@ function Thumbnail({ item, onClick, onEdit, onFullView }: {
           <ImageIcon className="w-8 h-8 animate-pulse" />
         </div>
       )}
-      
-      {/* Hover Actions */}
-      <div className="absolute inset-0 bg-ink/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-3 rounded-2xl z-20">
-        <button 
-          onClick={(e) => { e.stopPropagation(); onFullView(); }}
-          className="w-28 bg-white/20 hover:bg-white/40 backdrop-blur-md text-white py-2 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all border border-white/20 flex items-center justify-center gap-2"
-        >
-          <Maximize className="w-3 h-3" />
-          Full View
-        </button>
-        <button 
-          onClick={(e) => { e.stopPropagation(); onEdit(); }}
-          className="w-28 bg-brand hover:bg-brand/90 text-white py-2 rounded-full text-[9px] font-bold uppercase tracking-widest transition-all shadow-lg shadow-brand/20 flex items-center justify-center gap-2"
-        >
-          <Edit3 className="w-3 h-3" />
-          Edit Mode
-        </button>
-      </div>
-
       <div className="absolute bottom-0 left-0 right-0 bg-paper/90 backdrop-blur-md p-3 text-[10px] tracking-wider truncate text-ink/70 border-t border-ink/5 font-bold uppercase z-10">
         {item.baseName}
       </div>
@@ -977,14 +956,6 @@ export default function DatasetAnnotator() {
                 onClick={() => {
                   selectItem(startIndex + idx);
                 }} 
-                onEdit={() => {
-                  selectItem(startIndex + idx);
-                  setViewMode('editor');
-                }}
-                onFullView={() => {
-                  selectItem(startIndex + idx);
-                  setShowLightbox(true);
-                }}
               />
             ))}
           </div>
@@ -1110,12 +1081,12 @@ export default function DatasetAnnotator() {
               <button
                 onClick={() => {
                   if (selectedIndex === -1 && items.length > 0) selectItem(0);
-                  setShowLightbox(true);
+                  setViewMode('editor');
                 }}
-                className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-[9px] font-bold rounded-full transition-all uppercase tracking-widest ${showLightbox ? 'bg-white text-ink shadow-md' : 'text-ink/40 hover:text-ink'}`}
+                className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-[9px] font-bold rounded-full transition-all uppercase tracking-widest ${viewMode === 'editor' ? 'bg-white text-ink shadow-md' : 'text-ink/40 hover:text-ink'}`}
               >
                 <Edit3 className="w-3 h-3" />
-                Full View
+                Edit Mode
               </button>
             </div>
           )}
@@ -1262,19 +1233,19 @@ export default function DatasetAnnotator() {
               </div>
               <div className="flex-1 p-12 flex items-center justify-center relative overflow-hidden">
                 {activeItem.imageUrl ? (
-                  <div className="relative group">
+                  <div className="relative group max-h-[500px] w-full flex items-center justify-center">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img 
                       src={activeItem.imageUrl} 
                       alt={activeItem.baseName}
-                      className="max-w-full max-h-full object-contain shadow-2xl border border-ink/5 rounded-3xl z-10 bg-white p-4"
+                      className="max-w-full max-h-[300px] object-contain shadow-2xl border border-ink/5 rounded-3xl z-10 bg-white p-4"
                     />
                     <button 
                       onClick={() => setShowLightbox(true)}
-                      className="absolute top-8 right-8 bg-ink/80 hover:bg-brand backdrop-blur-md text-white p-3 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-2xl z-20 active:scale-90"
+                      className="absolute top-4 right-4 bg-ink/80 hover:bg-brand backdrop-blur-md text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-2xl z-20 active:scale-90"
                       title="Full View"
                     >
-                      <Maximize className="w-5 h-5" />
+                      <Maximize className="w-4 h-4" />
                     </button>
                   </div>
                 ) : (
