@@ -88,6 +88,7 @@ function Thumbnail({ item, onClick }: {
     
     return () => {
       isMounted = false;
+      if (url) URL.revokeObjectURL(url);
     };
   }, [item, url]);
 
@@ -124,7 +125,8 @@ export default function DatasetAnnotator() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isFallbackMode, setIsFallbackMode] = useState(false);
   
-  const [viewMode, setViewMode] = useState<'editor' | 'grid'>('editor');
+  const [viewMode, setViewMode] = useState<'overview' | 'editor' | 'grid'>('overview');
+  const [datasets, setDatasets] = useState<{name: string, handle: FileSystemDirectoryHandle}[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 24;
 
@@ -228,6 +230,7 @@ export default function DatasetAnnotator() {
     setError(null);
     
     if (!('showDirectoryPicker' in window)) {
+      // ... (keep fallback) ...
       const input = document.createElement('input');
       input.type = 'file';
       // @ts-ignore
@@ -292,6 +295,37 @@ export default function DatasetAnnotator() {
       setDirHandle(handle);
       setIsFallbackMode(false);
       
+      const subDirs: {name: string, handle: FileSystemDirectoryHandle}[] = [];
+      
+      // @ts-ignore
+      for await (const entry of handle.values()) {
+        if (entry.kind === 'directory') {
+          subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle});
+        }
+      }
+      
+      if (subDirs.length > 0) {
+        setDatasets(subDirs);
+        setViewMode('overview');
+        // Load project settings if they exist
+        const projectSettings = await loadProject(handle);
+        if (projectSettings) {
+            setSettings(prev => ({...prev, ...projectSettings}));
+        }
+      } else {
+        // No subdirectories, scan for images directly
+        await handleLoadDataset(handle);
+      }
+      
+    } catch (err: any) {
+      console.error(err);
+      if (err.name !== 'AbortError') {
+        setError(err.message || 'Failed to open directory.');
+      }
+    }
+  };
+
+  const handleLoadDataset = async (handle: FileSystemDirectoryHandle) => {
       const fileMap = new Map<string, { image?: FileSystemFileHandle, text?: FileSystemFileHandle }>();
       
       // @ts-ignore
@@ -333,12 +367,6 @@ export default function DatasetAnnotator() {
         setCurrentPage(1);
         setSelectedIndex(-1);
       }
-    } catch (err: any) {
-      console.error(err);
-      if (err.name !== 'AbortError') {
-        setError(err.message || 'Failed to open directory.');
-      }
-    }
   };
 
   const selectItem = async (index: number, currentItems: DatasetItem[] = items) => {
@@ -395,6 +423,51 @@ export default function DatasetAnnotator() {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  };
+
+  const saveProject = async (handle: FileSystemDirectoryHandle, settings: any) => {
+    try {
+      const fileHandle = await handle.getFileHandle('.annotator-project.json', { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(settings, null, 2));
+      await writable.close();
+    } catch (err) {
+      console.error("Error saving project:", err);
+    }
+  };
+
+  const renderOverview = () => {
+    return (
+      <div className="p-6">
+        <h2 className="text-2xl font-bold mb-4">Datasets</h2>
+        <div className="grid grid-cols-3 gap-4">
+          {datasets.map(dataset => (
+            <button
+              key={dataset.name}
+              onClick={() => handleLoadDataset(dataset.handle)}
+              className="p-4 border rounded-lg hover:bg-gray-100"
+            >
+              {dataset.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const handleLoadDataset = async (handle: FileSystemDirectoryHandle) => {
+    // ... logic for loading images from a directory ...
+  };
+
+  const loadProject = async (handle: FileSystemDirectoryHandle) => {
+    try {
+      const fileHandle = await handle.getFileHandle('.annotator-project.json');
+      const file = await fileHandle.getFile();
+      const content = await file.text();
+      return JSON.parse(content);
+    } catch (err) {
+      return null;
+    }
   };
 
   const startBatchGeneration = async () => {
@@ -811,14 +884,6 @@ export default function DatasetAnnotator() {
     }
   };
 
-  useEffect(() => {
-    return () => {
-      items.forEach(item => {
-        if (item.imageUrl) URL.revokeObjectURL(item.imageUrl);
-      });
-    };
-  }, [items]);
-
   const activeItem = selectedIndex >= 0 ? items[selectedIndex] : null;
 
   const [themeColor, setThemeColor] = useState<string>('255 99 33'); // Default #FF6321
@@ -1069,8 +1134,18 @@ export default function DatasetAnnotator() {
             </div>
           )}
           
+          {datasets.length > 0 && (
+            <button
+              onClick={() => setViewMode('overview')}
+              className={`w-full flex items-center justify-center gap-2 py-2 mb-4 text-[9px] font-bold rounded-full transition-all uppercase tracking-widest ${viewMode === 'overview' ? 'bg-white text-ink shadow-md' : 'text-ink/40 hover:text-ink'}`}
+            >
+              <LayoutGrid className="w-3 h-3" />
+              Overview
+            </button>
+          )}
+          
           {items.length > 0 && (
-            <div className="flex mt-6 p-1 border border-ink/10 rounded-full bg-ink/5">
+            <div className="flex p-1 border border-ink/10 rounded-full bg-ink/5">
               <button
                 onClick={() => setViewMode('grid')}
                 className={`flex-1 flex items-center justify-center gap-2 py-1.5 text-[9px] font-bold rounded-full transition-all uppercase tracking-widest ${viewMode === 'grid' ? 'bg-white text-ink shadow-md' : 'text-ink/40 hover:text-ink'}`}
@@ -1182,7 +1257,9 @@ export default function DatasetAnnotator() {
 
         {/* CENTER PANE */}
         <div className="flex-1 flex flex-col min-w-0 relative border-r border-ink/10">
-          {items.length === 0 ? (
+          {viewMode === 'overview' ? (
+            renderOverview()
+          ) : items.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-ink/10 font-serif italic tracking-widest">
               <Cpu className="w-24 h-24 mb-6 opacity-10" />
               <p>System Idle. Mount directory to begin.</p>
