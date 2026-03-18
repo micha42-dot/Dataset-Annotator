@@ -132,6 +132,7 @@ function Thumbnail({ item, onClick, isSelected, onToggleSelect }: {
 
 export default function DatasetAnnotator() {
   const [dirHandle, setDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [rootHandle, setRootHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [items, setItems] = useState<DatasetItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [currentText, setCurrentText] = useState<string>('');
@@ -438,6 +439,7 @@ export default function DatasetAnnotator() {
   };
 
   const processDirectory = async (handle: FileSystemDirectoryHandle, loadSession: boolean) => {
+    setRootHandle(handle);
     setDirHandle(handle);
     setIsFallbackMode(false);
     
@@ -1444,11 +1446,11 @@ export default function DatasetAnnotator() {
           <div className="flex items-center justify-between mb-6">
             <h1 
               onClick={() => {
-                if (dirHandle) {
+                if (rootHandle) {
                   setBrowsingHistory([]);
                   setItems([]);
                   setSelectedIndex(-1);
-                  browseDirectory(dirHandle, false);
+                  browseDirectory(rootHandle, false);
                 }
               }}
               className="text-xl font-serif italic tracking-tight flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
