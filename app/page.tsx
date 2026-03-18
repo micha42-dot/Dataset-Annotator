@@ -159,6 +159,31 @@ export default function DatasetAnnotator() {
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [selectedDatasetForModal, setSelectedDatasetForModal] = useState<any | null>(null);
+  const [modalSubfolders, setModalSubfolders] = useState<FileSystemDirectoryHandle[]>([]);
+
+  useEffect(() => {
+    const fetchModalSubfolders = async () => {
+      if (!selectedDatasetForModal?.handle) {
+        setModalSubfolders([]);
+        return;
+      }
+      
+      const subDirs: FileSystemDirectoryHandle[] = [];
+      try {
+        // @ts-ignore
+        for await (const entry of selectedDatasetForModal.handle.values()) {
+          if (entry.kind === 'directory') {
+            subDirs.push(entry as FileSystemDirectoryHandle);
+          }
+        }
+        setModalSubfolders(subDirs.sort((a, b) => a.name.localeCompare(b.name)));
+      } catch (err) {
+        console.error("Error fetching modal subfolders:", err);
+      }
+    };
+    
+    fetchModalSubfolders();
+  }, [selectedDatasetForModal]);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const [showFindReplace, setShowFindReplace] = useState(false);
@@ -363,7 +388,13 @@ export default function DatasetAnnotator() {
       const cached = metadataCache.current.get(cacheKey + '_subdirs');
       setDatasets(cached.subDirs);
       setCurrentDirImageCount(cached.currentCount);
-      setViewMode('overview');
+      
+      if (cached.subDirs.length === 0 && cached.currentCount > 0) {
+        handleLoadDataset(handle, false);
+      } else {
+        setViewMode('overview');
+      }
+      
       setLoading(false);
       return;
     }
@@ -412,7 +443,14 @@ export default function DatasetAnnotator() {
     
     setCurrentDirImageCount(currentCount);
     setDatasets(sortedSubDirs);
-    setViewMode('overview');
+    
+    // Auto-load if no subdirectories but has images
+    if (sortedSubDirs.length === 0 && currentCount > 0) {
+      handleLoadDataset(handle, false);
+    } else {
+      setViewMode('overview');
+    }
+    
     setLoading(false);
   };
 
@@ -697,7 +735,7 @@ export default function DatasetAnnotator() {
                   className="w-full py-4 bg-brand text-white rounded-2xl font-bold text-sm uppercase tracking-widest hover:shadow-xl hover:shadow-brand/20 transition-all flex items-center justify-center gap-3"
                 >
                   <FolderOpen className="w-5 h-5" />
-                  Load this folder ({selectedDatasetForModal.count})
+                  Load only images in this folder ({selectedDatasetForModal.count})
                 </button>
                 
                 {selectedDatasetForModal.recursiveCount > selectedDatasetForModal.count && (
@@ -709,21 +747,39 @@ export default function DatasetAnnotator() {
                     className="w-full py-4 bg-ink text-white rounded-2xl font-bold text-sm uppercase tracking-widest hover:shadow-xl transition-all flex items-center justify-center gap-3"
                   >
                     <Layers className="w-5 h-5" />
-                    Load all recursive ({selectedDatasetForModal.recursiveCount})
+                    Load everything from all folders ({selectedDatasetForModal.recursiveCount})
                   </button>
                 )}
 
                 {selectedDatasetForModal.hasSubdirs && (
-                  <button
-                    onClick={() => {
-                      browseDirectory(selectedDatasetForModal.handle);
-                      setSelectedDatasetForModal(null);
-                    }}
-                    className="w-full py-4 border border-ink/10 text-ink/60 rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-ink/5 transition-all flex items-center justify-center gap-3"
-                  >
-                    <LayoutGrid className="w-5 h-5" />
-                    Browse Subfolders
-                  </button>
+                  <div className="pt-2">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-ink/30 mb-3 px-1">Subfolders</p>
+                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                      {modalSubfolders.map(sub => (
+                        <button
+                          key={sub.name}
+                          onClick={() => {
+                            browseDirectory(sub);
+                            setSelectedDatasetForModal(null);
+                          }}
+                          className="py-2.5 px-3 border border-ink/10 text-ink/60 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-ink/5 transition-all text-left truncate flex items-center gap-2"
+                        >
+                          <FolderOpen className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">{sub.name}</span>
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => {
+                          browseDirectory(selectedDatasetForModal.handle);
+                          setSelectedDatasetForModal(null);
+                        }}
+                        className="col-span-2 py-3 border border-ink/10 text-ink/60 rounded-xl font-bold text-[10px] uppercase tracking-widest hover:bg-ink/5 transition-all flex items-center justify-center gap-2 mt-1"
+                      >
+                        <LayoutGrid className="w-4 h-4" />
+                        Explore All Subfolders
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -786,7 +842,13 @@ export default function DatasetAnnotator() {
               {datasets.map(dataset => (
                 <div 
                   key={dataset.name}
-                  onClick={() => setSelectedDatasetForModal(dataset)}
+                  onClick={() => {
+                    if (dataset.hasSubdirs && dataset.count === 0) {
+                      browseDirectory(dataset.handle);
+                    } else {
+                      setSelectedDatasetForModal(dataset);
+                    }
+                  }}
                   className="group relative bg-bg border border-ink/5 rounded-2xl overflow-hidden hover:border-theme transition-all duration-300 hover:shadow-2xl cursor-pointer"
                 >
                   <div className="aspect-video relative bg-ink/5 overflow-hidden">
@@ -1490,10 +1552,9 @@ export default function DatasetAnnotator() {
                 if (dirHandle) {
                   browseDirectory(dirHandle, false);
                   setBrowsingHistory([]);
+                  setItems([]);
+                  setSelectedIndex(-1);
                 }
-                setViewMode('overview');
-                setItems([]);
-                setSelectedIndex(-1);
               }}
               className="text-xl font-serif italic tracking-tight flex items-center gap-2.5 cursor-pointer hover:opacity-80 transition-opacity"
             >
