@@ -61,11 +61,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   geminiKey: '',
 };
 
-function Thumbnail({ item, onClick }: { 
+function Thumbnail({ item, onClick, isSelected, onToggleSelect }: { 
   item: DatasetItem, 
-  onClick: () => void 
+  onClick: () => void,
+  isSelected: boolean,
+  onToggleSelect: (e: React.MouseEvent) => void
 }) {
   const [url, setUrl] = useState<string | null>(item.imageUrl || null);
+  const isMissingText = !item.textContent || item.textContent.trim() === '';
   
   useEffect(() => {
     if (url) return;
@@ -94,7 +97,17 @@ function Thumbnail({ item, onClick }: {
   }, [item, url]);
 
   return (
-    <div onClick={onClick} className="cursor-pointer border border-ink/5 hover:border-brand transition-all bg-paper flex flex-col aspect-square relative group rounded-2xl overflow-hidden shadow-sm hover:shadow-xl hover:-translate-y-1">
+    <div onClick={onClick} className={`cursor-pointer border transition-all bg-paper flex flex-col aspect-square relative group rounded-2xl overflow-hidden shadow-sm hover:shadow-xl hover:-translate-y-1 ${isSelected ? 'border-brand ring-2 ring-brand/50' : 'border-ink/5 hover:border-brand'}`}>
+      <div className="absolute top-2 left-2 z-20">
+        <button onClick={onToggleSelect} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-brand border-brand' : 'bg-white/50 border-ink/20'}`}>
+           {isSelected && <div className="w-2 h-2 bg-white rounded-full" />}
+        </button>
+      </div>
+      {isMissingText && (
+        <div className="absolute top-2 right-2 z-20 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">
+          NO TXT
+        </div>
+      )}
       {url ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img src={url} alt={item.baseName} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -129,6 +142,7 @@ export default function DatasetAnnotator() {
   const [viewMode, setViewMode] = useState<'overview' | 'editor' | 'grid'>('overview');
   const [datasets, setDatasets] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const itemsPerPage = 24;
 
   const [showSettings, setShowSettings] = useState(true);
@@ -245,6 +259,57 @@ export default function DatasetAnnotator() {
     return await window.showDirectoryPicker({ mode: 'readwrite' });
   };
 
+  const countImagesRecursive = async (handle: FileSystemDirectoryHandle): Promise<number> => {
+    let count = 0;
+    // @ts-ignore
+    for await (const entry of handle.values()) {
+      if (entry.kind === 'file' && entry.name.match(/\.(png|jpg|jpeg|webp)$/i)) {
+        count++;
+      } else if (entry.kind === 'directory') {
+        count += await countImagesRecursive(entry as FileSystemDirectoryHandle);
+      }
+    }
+    return count;
+  };
+
+  const loadDatasetRecursive = async (handle: FileSystemDirectoryHandle, fileMap: Map<string, { image?: FileSystemFileHandle, text?: FileSystemFileHandle }>) => {
+    // @ts-ignore
+    for await (const entry of handle.values()) {
+      if (entry.kind === 'file') {
+        const match = entry.name.match(/^(.*)\.(png|jpg|jpeg|webp|txt)$/i);
+        if (match) {
+          const baseName = match[1];
+          const ext = match[2].toLowerCase();
+          
+          if (!fileMap.has(baseName)) fileMap.set(baseName, {});
+          const item = fileMap.get(baseName)!;
+          
+          if (ext === 'txt') {
+            item.text = entry as FileSystemFileHandle;
+          } else {
+            item.image = entry as FileSystemFileHandle;
+          }
+        }
+      } else if (entry.kind === 'directory') {
+        await loadDatasetRecursive(entry as FileSystemDirectoryHandle, fileMap);
+      }
+    }
+  };
+
+  const getFirstImageRecursive = async (handle: FileSystemDirectoryHandle): Promise<string | null> => {
+    // @ts-ignore
+    for await (const entry of handle.values()) {
+      if (entry.kind === 'file' && entry.name.match(/\.(png|jpg|jpeg|webp)$/i)) {
+        const file = await (entry as FileSystemFileHandle).getFile();
+        return URL.createObjectURL(file);
+      } else if (entry.kind === 'directory') {
+        const result = await getFirstImageRecursive(entry as FileSystemDirectoryHandle);
+        if (result) return result;
+      }
+    }
+    return null;
+  };
+
   const processDirectory = async (handle: FileSystemDirectoryHandle, loadSession: boolean) => {
     setDirHandle(handle);
     setIsFallbackMode(false);
@@ -256,19 +321,14 @@ export default function DatasetAnnotator() {
         }
     }
 
-    const subDirs: {name: string, handle: FileSystemDirectoryHandle, count: number}[] = [];
+    const subDirs: {name: string, handle: FileSystemDirectoryHandle, count: number, previewUrl: string | null}[] = [];
     
     // @ts-ignore
     for await (const entry of handle.values()) {
       if (entry.kind === 'directory') {
-        let count = 0;
-        // @ts-ignore
-        for await (const fileEntry of (entry as FileSystemDirectoryHandle).values()) {
-            if (fileEntry.kind === 'file' && fileEntry.name.match(/\.(png|jpg|jpeg|webp)$/i)) {
-                count++;
-            }
-        }
-        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle, count});
+        const count = await countImagesRecursive(entry as FileSystemDirectoryHandle);
+        const previewUrl = await getFirstImageRecursive(entry as FileSystemDirectoryHandle);
+        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle, count, previewUrl});
       }
     }
     
@@ -391,25 +451,7 @@ export default function DatasetAnnotator() {
   const handleLoadDataset = async (handle: FileSystemDirectoryHandle) => {
       const fileMap = new Map<string, { image?: FileSystemFileHandle, text?: FileSystemFileHandle }>();
       
-      // @ts-ignore
-      for await (const entry of handle.values()) {
-        if (entry.kind === 'file') {
-          const match = entry.name.match(/^(.*)\.(png|jpg|jpeg|webp|txt)$/i);
-          if (match) {
-            const baseName = match[1];
-            const ext = match[2].toLowerCase();
-            
-            if (!fileMap.has(baseName)) fileMap.set(baseName, {});
-            const item = fileMap.get(baseName)!;
-            
-            if (ext === 'txt') {
-              item.text = entry as FileSystemFileHandle;
-            } else {
-              item.image = entry as FileSystemFileHandle;
-            }
-          }
-        }
-      }
+      await loadDatasetRecursive(handle, fileMap);
       
       const newItems: DatasetItem[] = [];
       for (const [baseName, handles] of fileMap.entries()) {
@@ -503,19 +545,24 @@ export default function DatasetAnnotator() {
 
   const renderOverview = () => {
     return (
-      <div className="p-6">
+      <div className="p-6 h-full flex flex-col">
         <h2 className="text-2xl font-bold mb-4">Datasets</h2>
-        <div className="grid grid-cols-3 gap-4">
-          {datasets.map(dataset => (
-            <button
-              key={dataset.name}
-              onClick={() => handleLoadDataset(dataset.handle)}
-              className="p-4 border rounded-lg hover:bg-gray-100 flex flex-col items-start"
-            >
-              <span className="font-bold">{dataset.name}</span>
-              <span className="text-xs text-gray-500">{dataset.count} images</span>
-            </button>
-          ))}
+        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+          <div className="grid grid-cols-3 gap-4">
+            {datasets.map(dataset => (
+              <button
+                key={dataset.name}
+                onClick={() => handleLoadDataset(dataset.handle)}
+                className="p-4 border rounded-lg hover:bg-gray-100 flex flex-col items-start gap-2"
+              >
+                {dataset.previewUrl && (
+                  <img src={dataset.previewUrl} alt={dataset.name} className="w-full h-32 object-cover rounded" />
+                )}
+                <span className="font-bold">{dataset.name}</span>
+                <span className="text-xs text-gray-500">{dataset.count} images</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -1053,6 +1100,17 @@ export default function DatasetAnnotator() {
               </button>
             </div>
           </div>
+          {selectedItems.size > 0 && (
+            <button
+              onClick={() => {
+                // TODO: Implement bulk AI annotation
+                alert(`Generating AI annotations for ${selectedItems.size} items.`);
+              }}
+              className="bg-brand text-white text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full hover:bg-brand/90 transition-all shadow-lg"
+            >
+              Bulk AI Annotation ({selectedItems.size})
+            </button>
+          )}
           <div className="flex items-center gap-4">
             <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
@@ -1090,6 +1148,17 @@ export default function DatasetAnnotator() {
                 onClick={() => {
                   selectItem(startIndex + idx);
                 }} 
+                isSelected={selectedItems.has(item.baseName)}
+                onToggleSelect={(e) => {
+                  e.stopPropagation();
+                  const newSelected = new Set(selectedItems);
+                  if (newSelected.has(item.baseName)) {
+                    newSelected.delete(item.baseName);
+                  } else {
+                    newSelected.add(item.baseName);
+                  }
+                  setSelectedItems(newSelected);
+                }}
               />
             ))}
           </div>
