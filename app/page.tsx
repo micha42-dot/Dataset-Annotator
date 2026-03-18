@@ -137,6 +137,7 @@ export default function DatasetAnnotator() {
   const [currentText, setCurrentText] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isFallbackMode, setIsFallbackMode] = useState(false);
@@ -1568,6 +1569,14 @@ export default function DatasetAnnotator() {
 
         {/* CENTER PANE */}
         <div className="flex-1 flex flex-col min-w-0 relative border-r border-ink/10">
+          {loading && (
+            <div className="absolute inset-0 z-40 bg-bg/60 backdrop-blur-sm flex items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-12 h-12 border-4 border-theme border-t-transparent rounded-full animate-spin"></div>
+                <p className="font-mono text-xs uppercase tracking-widest text-ink/40 animate-pulse">Processing Directory...</p>
+              </div>
+            </div>
+          )}
           {viewMode === 'overview' ? (
             renderOverview()
           ) : items.length === 0 ? (
