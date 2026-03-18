@@ -140,6 +140,7 @@ export default function DatasetAnnotator() {
   const [isFallbackMode, setIsFallbackMode] = useState(false);
   
   const [viewMode, setViewMode] = useState<'overview' | 'editor' | 'grid'>('overview');
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [datasets, setDatasets] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -321,14 +322,14 @@ export default function DatasetAnnotator() {
         }
     }
 
-    const subDirs: {name: string, handle: FileSystemDirectoryHandle, count: number, previewUrl: string | null, isSelected: boolean}[] = [];
+    const subDirs: {name: string, handle: FileSystemDirectoryHandle, count: number, previewUrl: string | null}[] = [];
     
     // @ts-ignore
     for await (const entry of handle.values()) {
       if (entry.kind === 'directory') {
         const count = await countImagesRecursive(entry as FileSystemDirectoryHandle);
         const previewUrl = await getFirstImageRecursive(entry as FileSystemDirectoryHandle);
-        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle, count, previewUrl, isSelected: false});
+        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle, count, previewUrl});
       }
     }
     
@@ -448,36 +449,6 @@ export default function DatasetAnnotator() {
     }
   };
 
-  const handleLoadMultipleDatasets = async (handles: FileSystemDirectoryHandle[]) => {
-      const fileMap = new Map<string, { image?: FileSystemFileHandle, text?: FileSystemFileHandle }>();
-      
-      for (const handle of handles) {
-        await loadDatasetRecursive(handle, fileMap);
-      }
-      
-      const newItems: DatasetItem[] = [];
-      for (const [baseName, handles] of fileMap.entries()) {
-        if (handles.image) {
-          newItems.push({
-            baseName,
-            imageHandle: handles.image,
-            textHandle: handles.text,
-            dirHandle: handles.image // This might be wrong, dirHandle is used for saving
-          });
-        }
-      }
-      
-      const sortedItems = newItems.sort((a, b) => a.baseName.localeCompare(b.baseName));
-      setItems(sortedItems);
-      // setDirHandle(handle); // Which one to use?
-      
-      if (sortedItems.length > 0) {
-        setViewMode('grid');
-        setCurrentPage(1);
-        setSelectedIndex(-1);
-      }
-  };
-
   const handleLoadDataset = async (handle: FileSystemDirectoryHandle) => {
       const fileMap = new Map<string, { image?: FileSystemFileHandle, text?: FileSystemFileHandle }>();
       
@@ -574,33 +545,16 @@ export default function DatasetAnnotator() {
   };
 
   const renderOverview = () => {
-    const selectedCount = datasets.filter(d => d.isSelected).length;
     return (
       <div className="p-6 h-full flex flex-col">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">Datasets</h2>
-          {selectedCount > 0 && (
-            <button
-              onClick={async () => {
-                const selectedHandles = datasets.filter(d => d.isSelected).map(d => d.handle);
-                await handleLoadMultipleDatasets(selectedHandles);
-              }}
-              className="bg-brand text-white text-[10px] font-bold uppercase tracking-widest px-4 py-2 rounded-full hover:bg-brand/90 transition-all shadow-lg"
-            >
-              Load Selected ({selectedCount})
-            </button>
-          )}
-        </div>
+        <h2 className="text-2xl font-bold mb-4">Datasets</h2>
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
           <div className="grid grid-cols-3 gap-4">
             {datasets.map(dataset => (
               <button
                 key={dataset.name}
-                onClick={() => {
-                  const newDatasets = datasets.map(d => d.name === dataset.name ? {...d, isSelected: !d.isSelected} : d);
-                  setDatasets(newDatasets);
-                }}
-                className={`p-4 border rounded-lg hover:bg-gray-100 flex flex-col items-start gap-2 ${dataset.isSelected ? 'border-brand ring-2 ring-brand/50' : 'border-ink/5'}`}
+                onClick={() => handleLoadDataset(dataset.handle)}
+                className="p-4 border rounded-lg hover:bg-gray-100 flex flex-col items-start gap-2 border-ink/5"
               >
                 {dataset.previewUrl && (
                   <img src={dataset.previewUrl} alt={dataset.name} className="w-full h-32 object-cover rounded" />
@@ -1145,6 +1099,13 @@ export default function DatasetAnnotator() {
               >
                 <Maximize2 className="w-3.5 h-3.5" />
               </button>
+              <button 
+                onClick={() => setIsSelectionMode(!isSelectionMode)}
+                className={`p-1.5 rounded-full transition-all ${isSelectionMode ? 'bg-brand text-white shadow-sm' : 'text-ink/30 hover:text-ink'}`}
+                title="Toggle Selection Mode"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
           {selectedItems.size > 0 && (
@@ -1193,9 +1154,16 @@ export default function DatasetAnnotator() {
                 key={item.baseName} 
                 item={item} 
                 onClick={() => {
-                  selectItem(startIndex + idx);
+                  if (isSelectionMode) {
+                    const newSelected = new Set(selectedItems);
+                    if (newSelected.has(item.baseName)) newSelected.delete(item.baseName);
+                    else newSelected.add(item.baseName);
+                    setSelectedItems(newSelected);
+                  } else {
+                    selectItem(startIndex + idx);
+                  }
                 }} 
-                isSelected={selectedItems.has(item.baseName)}
+                isSelected={selectedItems.has(item.baseName) || (!isSelectionMode && selectedIndex === startIndex + idx)}
                 onToggleSelect={(e) => {
                   e.stopPropagation();
                   const newSelected = new Set(selectedItems);
