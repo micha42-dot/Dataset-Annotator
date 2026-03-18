@@ -20,6 +20,7 @@ import {
   Terminal,
   Cpu,
   Archive,
+  CheckSquare,
   LayoutGrid,
   Maximize2,
   Maximize
