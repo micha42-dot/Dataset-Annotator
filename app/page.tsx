@@ -151,6 +151,7 @@ export default function DatasetAnnotator() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const itemsPerPage = 24;
+  const metadataCache = useRef<Map<string, any>>(new Map());
 
   const [showSettings, setShowSettings] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -341,26 +342,51 @@ export default function DatasetAnnotator() {
     setBrowsingHandle(handle);
     setSelectedItems(new Set());
     setIsSelectionMode(false);
+    
     if (addToHistory && browsingHandle && browsingHandle !== handle) {
       setBrowsingHistory(prev => [...prev, browsingHandle]);
     }
     
-    const subDirs: {name: string, handle: FileSystemDirectoryHandle, count: number, recursiveCount: number, previewUrl: string | null, hasSubdirs: boolean}[] = [];
+    const cacheKey = handle.name || 'root';
     
+    const subDirEntries: FileSystemDirectoryHandle[] = [];
     // @ts-ignore
     for await (const entry of handle.values()) {
       if (entry.kind === 'directory') {
-        const recursiveCount = await countImagesRecursive(entry as FileSystemDirectoryHandle);
-        const count = await countImagesInDir(entry as FileSystemDirectoryHandle);
-        const previewUrl = await getFirstImageRecursive(entry as FileSystemDirectoryHandle);
-        const hasSub = await hasSubdirectories(entry as FileSystemDirectoryHandle);
-        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle, count, recursiveCount, previewUrl, hasSubdirs: hasSub});
+        subDirEntries.push(entry as FileSystemDirectoryHandle);
       }
     }
+
+    const subDirs = await Promise.all(subDirEntries.map(async (entry) => {
+      const entryCacheKey = `${cacheKey}/${entry.name}`;
+      if (metadataCache.current.has(entryCacheKey)) {
+        return metadataCache.current.get(entryCacheKey);
+      }
+
+      // Fetch metadata in parallel for this entry
+      const [recursiveCount, count, previewUrl, hasSub] = await Promise.all([
+        countImagesRecursive(entry),
+        countImagesInDir(entry),
+        getFirstImageRecursive(entry),
+        hasSubdirectories(entry)
+      ]);
+
+      const data = {
+        name: entry.name,
+        handle: entry,
+        count,
+        recursiveCount,
+        previewUrl,
+        hasSubdirs: hasSub
+      };
+      
+      metadataCache.current.set(entryCacheKey, data);
+      return data;
+    }));
     
     const currentCount = await countImagesInDir(handle);
     setCurrentDirImageCount(currentCount);
-    setDatasets(subDirs);
+    setDatasets(subDirs.sort((a, b) => a.name.localeCompare(b.name)));
     setViewMode('overview');
     setLoading(false);
   };
@@ -604,35 +630,49 @@ export default function DatasetAnnotator() {
             {browsingHistory.length > 0 && (
               <button 
                 onClick={handleGoBack}
-                className="p-2 hover:bg-ink/5 rounded-full transition-colors"
+                className="p-2 hover:bg-ink/5 rounded-full transition-colors group"
                 title="Back"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <ChevronLeft className="w-6 h-6 group-hover:-translate-x-1 transition-transform" />
               </button>
             )}
-            <h2 className="text-2xl font-bold">
-              {browsingHandle?.name || 'Datasets'}
-            </h2>
+            <div>
+              <h2 className="text-2xl font-bold">
+                {browsingHandle?.name || 'Datasets'}
+              </h2>
+              <p className="text-xs text-ink/30 font-mono uppercase tracking-widest mt-1">
+                {browsingHistory.length > 0 ? 'Subdirectory' : 'Root Directory'}
+              </p>
+            </div>
           </div>
           
-          {currentDirImageCount > 0 && (
-            <div className="flex gap-2">
-              <button
-                onClick={() => browsingHandle && handleLoadDataset(browsingHandle, false)}
-                className="px-4 py-2 bg-ink text-bg rounded-lg hover:opacity-90 transition-opacity text-sm font-medium flex items-center gap-2"
-              >
-                <FolderOpen className="w-4 h-4" />
-                Load this folder ({currentDirImageCount} images)
-              </button>
-              <button
-                onClick={() => browsingHandle && handleLoadDataset(browsingHandle, true)}
-                className="px-4 py-2 border border-ink/10 rounded-lg hover:bg-ink/5 transition-colors text-sm font-medium flex items-center gap-2"
-              >
-                <Layers className="w-4 h-4" />
-                Load all recursive
-              </button>
-            </div>
-          )}
+          <div className="flex gap-3">
+            {currentDirImageCount > 0 && (
+              <div className="flex items-center gap-2 bg-ink/5 p-1 rounded-xl border border-ink/5">
+                <button
+                  onClick={() => browsingHandle && handleLoadDataset(browsingHandle, false)}
+                  className="px-4 py-2 bg-ink text-bg rounded-lg hover:opacity-90 transition-opacity text-xs font-bold flex items-center gap-2 shadow-lg"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  Load {currentDirImageCount} images
+                </button>
+                <button
+                  onClick={() => browsingHandle && handleLoadDataset(browsingHandle, true)}
+                  className="px-4 py-2 hover:bg-ink/5 rounded-lg transition-colors text-xs font-bold flex items-center gap-2 text-ink/60"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  Recursive
+                </button>
+              </div>
+            )}
+            <button
+              onClick={handleOpenMainDirectory}
+              className="px-4 py-2 border border-ink/10 rounded-xl hover:bg-ink/5 transition-colors text-xs font-bold flex items-center gap-2"
+            >
+              <Archive className="w-3.5 h-3.5" />
+              Change Root
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
@@ -641,58 +681,76 @@ export default function DatasetAnnotator() {
               {datasets.map(dataset => (
                 <div 
                   key={dataset.name}
-                  className="group relative bg-bg border border-ink/5 rounded-2xl overflow-hidden hover:border-theme transition-all duration-300 hover:shadow-xl"
+                  onClick={() => browseDirectory(dataset.handle)}
+                  className="group relative bg-bg border border-ink/5 rounded-2xl overflow-hidden hover:border-theme transition-all duration-300 hover:shadow-2xl cursor-pointer"
                 >
                   <div className="aspect-video relative bg-ink/5 overflow-hidden">
                     {dataset.previewUrl ? (
                       <img 
                         src={dataset.previewUrl} 
                         alt={dataset.name} 
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
                       />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-ink/20">
+                      <div className="w-full h-full flex items-center justify-center text-ink/10">
                         <FolderOpen className="w-12 h-12" />
                       </div>
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-4">
+                    
+                    {/* Hover Overlay with direct actions */}
+                    <div className="absolute inset-0 bg-ink/40 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center gap-3 p-6">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          browseDirectory(dataset.handle);
+                        }}
+                        className="w-full py-2.5 bg-white text-black rounded-xl text-[10px] font-bold uppercase tracking-widest hover:scale-105 transition-transform shadow-xl"
+                      >
+                        Browse Subfolders
+                      </button>
                       <div className="flex gap-2 w-full">
                         <button
-                          onClick={() => browseDirectory(dataset.handle)}
-                          className="flex-1 py-2 bg-white text-black rounded-lg text-xs font-bold hover:bg-gray-100 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLoadDataset(dataset.handle, false);
+                          }}
+                          className="flex-1 py-2 bg-theme text-white rounded-xl text-[9px] font-bold uppercase tracking-widest hover:scale-105 transition-transform shadow-xl"
                         >
-                          Open
+                          Load Folder
                         </button>
                         <button
-                          onClick={() => handleLoadDataset(dataset.handle, false)}
-                          className="flex-1 py-2 bg-theme text-white rounded-lg text-xs font-bold hover:opacity-90 transition-opacity"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLoadDataset(dataset.handle, true);
+                          }}
+                          className="flex-1 py-2 bg-ink text-white rounded-xl text-[9px] font-bold uppercase tracking-widest hover:scale-105 transition-transform shadow-xl"
                         >
-                          Load
+                          Recursive
                         </button>
                       </div>
                     </div>
                   </div>
                   
-                  <div className="p-4">
-                    <div className="flex items-start justify-between mb-1">
-                      <h3 className="font-bold text-lg truncate pr-2" title={dataset.name}>
+                  <div className="p-5">
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-bold text-lg truncate pr-2 group-hover:text-theme transition-colors" title={dataset.name}>
                         {dataset.name}
                       </h3>
                       {dataset.hasSubdirs && (
-                        <span className="px-2 py-0.5 bg-ink/5 rounded text-[10px] font-bold uppercase tracking-wider text-ink/40">
-                          Subfolders
-                        </span>
+                        <div className="flex -space-x-1">
+                          <div className="w-2 h-2 rounded-full bg-theme/40 animate-pulse" />
+                        </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-ink/40 font-medium">
-                      <span className="flex items-center gap-1">
+                    <div className="flex items-center gap-4 text-[10px] text-ink/40 font-bold uppercase tracking-widest">
+                      <span className="flex items-center gap-1.5">
                         <ImageIcon className="w-3 h-3" />
                         {dataset.count}
                       </span>
                       {dataset.recursiveCount > dataset.count && (
-                        <span className="flex items-center gap-1">
+                        <span className="flex items-center gap-1.5 text-theme/60">
                           <Layers className="w-3 h-3" />
-                          {dataset.recursiveCount} total
+                          {dataset.recursiveCount}
                         </span>
                       )}
                     </div>
@@ -701,14 +759,25 @@ export default function DatasetAnnotator() {
               ))}
             </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-ink/20 gap-4">
-              <FolderOpen className="w-16 h-16 opacity-20" />
-              <p className="font-mono text-sm">No subdirectories found</p>
-              {currentDirImageCount === 0 && (
-                <p className="text-xs max-w-xs text-center">
-                  This folder appears to be empty or contains no supported image formats.
-                </p>
-              )}
+            <div className="h-full flex flex-col items-center justify-center text-ink/10 gap-6">
+              <div className="relative">
+                <FolderOpen className="w-24 h-24 opacity-10" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <X className="w-8 h-8 opacity-20" />
+                </div>
+              </div>
+              <div className="text-center space-y-2">
+                <p className="font-mono text-sm uppercase tracking-widest">No subdirectories</p>
+                {currentDirImageCount > 0 ? (
+                  <p className="text-[10px] max-w-xs text-ink/30 font-bold uppercase tracking-wider">
+                    This folder contains {currentDirImageCount} images. Use the load button at the top.
+                  </p>
+                ) : (
+                  <p className="text-[10px] max-w-xs text-ink/30 font-bold uppercase tracking-wider">
+                    This folder is empty.
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
