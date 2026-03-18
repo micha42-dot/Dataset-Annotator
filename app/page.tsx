@@ -256,12 +256,19 @@ export default function DatasetAnnotator() {
         }
     }
 
-    const subDirs: {name: string, handle: FileSystemDirectoryHandle}[] = [];
+    const subDirs: {name: string, handle: FileSystemDirectoryHandle, count: number}[] = [];
     
     // @ts-ignore
     for await (const entry of handle.values()) {
       if (entry.kind === 'directory') {
-        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle});
+        let count = 0;
+        // @ts-ignore
+        for await (const fileEntry of (entry as FileSystemDirectoryHandle).values()) {
+            if (fileEntry.kind === 'file' && fileEntry.name.match(/\.(png|jpg|jpeg|webp)$/i)) {
+                count++;
+            }
+        }
+        subDirs.push({name: entry.name, handle: entry as FileSystemDirectoryHandle, count});
       }
     }
     
@@ -503,9 +510,10 @@ export default function DatasetAnnotator() {
             <button
               key={dataset.name}
               onClick={() => handleLoadDataset(dataset.handle)}
-              className="p-4 border rounded-lg hover:bg-gray-100"
+              className="p-4 border rounded-lg hover:bg-gray-100 flex flex-col items-start"
             >
-              {dataset.name}
+              <span className="font-bold">{dataset.name}</span>
+              <span className="text-xs text-gray-500">{dataset.count} images</span>
             </button>
           ))}
         </div>
@@ -1546,7 +1554,7 @@ export default function DatasetAnnotator() {
                   onChange={handleTextChange}
                   onKeyDown={handleKeyDown}
                   placeholder="Enter annotation data..."
-                  className={`flex-1 w-full bg-transparent text-ink p-6 resize-none focus:outline-none focus:ring-0 text-sm leading-relaxed custom-scrollbar font-serif italic`}
+                  className={`flex-1 w-full bg-white border border-ink/10 p-6 rounded-xl resize-none focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand/20 transition-all text-sm leading-relaxed custom-scrollbar font-serif italic`}
                   spellCheck={false}
                 />
                 
